@@ -43,6 +43,10 @@ func main() {
 	args := flag.Args()
 	if len(args) >= 1 {
 		if c, ok := commands[args[0]]; ok {
+			c.fs.Usage = func() {
+				c.fs.PrintDefaults()
+				os.Exit(1)
+			}
 			c.fs.SetOutput(os.Stderr)
 			c.fs.Parse(args[1:])
 			c.do()

@@ -47,7 +47,7 @@ func init() {
 
 func doComplete(out io.Writer, in io.Reader, args []string) int {
 	if len(args) != 3 {
-		fmt.Fprint(out, "complete: three arguments required")
+		fmt.Fprint(out, "complete: three arguments required\n")
 		return 1
 	}
 	argLead := args[0]
@@ -107,7 +107,7 @@ func resolvePackageSpec(in io.Reader, spec string) string {
 			path = pkg.ImportPath
 		}
 	case strings.Contains(spec, "/"):
-		path = strings.Trim(spec, "/ /t/n")
+		path = strings.Trim(spec, "/ \t\n")
 	default:
 		if p, ok := readImports(in)[spec]; ok {
 			path = p
@@ -118,7 +118,7 @@ func resolvePackageSpec(in io.Reader, spec string) string {
 
 func doResolve(out io.Writer, in io.Reader, args []string) int {
 	if len(args) != 1 {
-		fmt.Fprint(out, "resolve: one argument required")
+		fmt.Fprint(out, "resolve: one argument required\n")
 		return 1
 	}
 	path := resolvePackageSpec(in, args[0])

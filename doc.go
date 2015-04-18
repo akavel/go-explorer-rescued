@@ -15,6 +15,7 @@ import (
 	"go/token"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -57,29 +58,36 @@ func doDoc(out io.Writer, args []string) int {
 	}
 
 	p := docPrinter{
-		w:       &bytes.Buffer{},
 		dpkg:    dpkg,
 		fset:    pkg.FSet,
+		dir:     pkg.BPkg.Dir,
 		lineNum: 1,
+		index:   make(map[string]int),
 	}
 	p.execute(out)
 	return 0
 }
 
 type docPrinter struct {
-	w *bytes.Buffer
-
 	fset *token.FileSet
 	dpkg *doc.Package
+	dir  string
 
+	// Output buffers
+	buf     bytes.Buffer
+	metaBuf bytes.Buffer
+
+	index map[string]int
+
+	// Fields used by currentLineColumn
 	lineNum  int
 	linePos  int
 	lineScan int
 }
 
 func (p *docPrinter) execute(out io.Writer) {
-	fmt.Fprintf(p.w, "package %s\n_\n", p.dpkg.Name)
-	fmt.Fprintf(p.w, "    import \"%s\"\n\n", p.dpkg.ImportPath)
+	fmt.Fprintf(&p.buf, "package %s\n_\n", p.dpkg.Name)
+	fmt.Fprintf(&p.buf, "    import \"%s\"\n\n", p.dpkg.ImportPath)
 	p.doc(p.dpkg.Doc)
 
 	p.head("CONSTANTS", len(p.dpkg.Consts))
@@ -100,20 +108,21 @@ func (p *docPrinter) execute(out io.Writer) {
 		p.funcs(d.Funcs)
 		p.funcs(d.Methods)
 	}
-	out.Write(p.w.Bytes())
+	p.metaBuf.WriteString("D\n")
+	p.metaBuf.WriteTo(out)
+	p.buf.WriteTo(out)
 }
 
 const (
-	noAnnotation = iota
-	anchorAnnotation
-	packageLinkAnnotation
-	builtinAnnotation
-	linkAnnotation
-	linkBeginAnnotation
-	linkEndAnnotation
+	noLink = iota
+	sourceLink
+	packageLink
+	docLink
+	beginDocLink
+	endDocLink
 )
 
-type annotation struct {
+type link struct {
 	kind int
 	data string
 	pos  token.Pos
@@ -128,7 +137,7 @@ func (p *docPrinter) decl(decl ast.Decl) {
 		p.fset,
 		&printer.CommentedNode{Node: decl, Comments: v.comments})
 	if err != nil {
-		p.w.WriteString(err.Error())
+		p.buf.WriteString(err.Error())
 		return
 	}
 	buf := bytes.TrimRight(w.Bytes(), " \t\n")
@@ -139,6 +148,7 @@ func (p *docPrinter) decl(decl ast.Decl) {
 	base := file.Base()
 	s.Init(file, buf, nil, scanner.ScanComments)
 	lastOffset := 0
+	line, column := 0, 0
 loop:
 	for {
 		pos, tok, lit := s.Scan()
@@ -146,54 +156,69 @@ loop:
 		case token.EOF:
 			break loop
 		case token.IDENT:
-			if len(v.annotations) == 0 {
+			if len(v.links) == 0 {
 				// Oops!
 				break loop
 			}
 			offset := int(pos) - base
-			p.w.Write(buf[lastOffset:offset])
+			p.buf.Write(buf[lastOffset:offset])
 			lastOffset = offset + len(lit)
-			a := v.annotations[0]
-			v.annotations = v.annotations[1:]
+			a := v.links[0]
+			v.links = v.links[1:]
 			switch a.kind {
-			case linkBeginAnnotation:
-				p.w.WriteByte('|')
-				p.w.WriteString(lit)
-			case linkEndAnnotation:
-				p.w.WriteString(lit)
-				p.w.WriteByte('|')
-			case linkAnnotation, packageLinkAnnotation, builtinAnnotation:
-				p.w.WriteByte('|')
-				p.w.WriteString(lit)
-				p.w.WriteByte('|')
-			case anchorAnnotation:
-				p.w.WriteByte('!')
-				p.w.WriteString(lit)
-				p.w.WriteByte('!')
+			case beginDocLink:
+				line, column = p.currentLineColumn()
+				p.buf.WriteByte('|')
+				p.buf.WriteString(lit)
+			case docLink:
+				line, column = p.currentLineColumn()
+				p.buf.WriteByte('|')
+				fallthrough
+			case endDocLink:
+				p.buf.WriteString(lit)
+				p.buf.WriteByte('|')
+				file := ""
+				if a.data != "" {
+					file = "godoc://" + a.data
+				}
+				p.addTag(line, column, file, p.stringIndex(lit))
+			case packageLink:
+				line, column = p.currentLineColumn()
+				p.buf.WriteByte('|')
+				p.buf.WriteString(lit)
+				p.buf.WriteByte('|')
+				p.addTag(line, column, "godoc://"+a.data, p.stringIndex("0"))
+			case sourceLink:
+				line, column = p.currentLineColumn()
+				p.buf.WriteByte('!')
+				p.buf.WriteString(lit)
+				p.buf.WriteByte('!')
+				position := p.fset.Position(a.pos)
+				p.addTag(line, column, filepath.Join(p.dir, position.Filename), -position.Line)
 			default:
-				p.w.WriteString(lit)
+				p.buf.WriteString(lit)
 			}
 		}
 	}
-	p.w.Write(buf[lastOffset:])
-	p.w.WriteString("\n_\n")
+	p.buf.Write(buf[lastOffset:])
+	p.buf.WriteString("\n_\n")
 }
 
 func (p *docPrinter) doc(s string) {
 	s = strings.TrimRight(s, " \t\n")
 	if s != "" {
-		doc.ToText(p.w, s, "    ", "      ", 80)
-		b := p.w.Bytes()
+		doc.ToText(&p.buf, s, "    ", "      ", 80)
+		b := p.buf.Bytes()
 		if b[len(b)-1] != '\n' {
-			p.w.WriteByte('\n')
+			p.buf.WriteByte('\n')
 		}
-		p.w.WriteByte('\n')
+		p.buf.WriteByte('\n')
 	}
 }
 
 func (p *docPrinter) head(title string, n int) {
 	if n > 0 {
-		fmt.Fprintf(p.w, "%s\n\n", title)
+		fmt.Fprintf(&p.buf, "%s\n\n", title)
 	}
 }
 
@@ -211,8 +236,23 @@ func (p *docPrinter) funcs(values []*doc.Func) {
 	}
 }
 
-func (p *docPrinter) lineAndColumn() (int, int) {
-	b := p.w.Bytes()
+func (p *docPrinter) addTag(line int, start int, file string, address int) {
+	_, end := p.currentLineColumn()
+	fmt.Fprintf(&p.metaBuf, "T %d %d %d %d %d\n", line, start, end, p.stringIndex(file), address)
+}
+
+func (p *docPrinter) stringIndex(s string) int {
+	if i, ok := p.index[s]; ok {
+		return i
+	}
+	i := len(p.index)
+	p.index[s] = i
+	fmt.Fprintf(&p.metaBuf, "S %s\n", s)
+	return i
+}
+
+func (p *docPrinter) currentLineColumn() (int, int) {
+	b := p.buf.Bytes()
 	for i, c := range b[p.lineScan:] {
 		if c == '\n' {
 			p.lineNum += 1
@@ -275,37 +315,37 @@ var predeclared = map[string]int{
 	"recover": predeclaredFunction,
 }
 
-// declVisitor modifies a declaration AST for printing and collects annotations.
+// declVisitor modifies a declaration AST for printing and collects links.
 type declVisitor struct {
-	annotations []*annotation
-	comments    []*ast.CommentGroup
+	links    []*link
+	comments []*ast.CommentGroup
 }
 
-func (v *declVisitor) add(kind int, data string, pos token.Pos) {
-	v.annotations = append(v.annotations, &annotation{kind: kind, data: data, pos: pos})
+func (v *declVisitor) addLink(kind int, data string, pos token.Pos) {
+	v.links = append(v.links, &link{kind: kind, data: data, pos: pos})
 }
 
 func (v *declVisitor) ignoreName() {
-	v.annotations = append(v.annotations, &annotation{kind: noAnnotation})
+	v.links = append(v.links, &link{kind: noLink})
 }
 
 func (v *declVisitor) Visit(n ast.Node) ast.Visitor {
 	switch n := n.(type) {
 	case *ast.TypeSpec:
-		v.add(anchorAnnotation, "", n.Pos())
+		v.addLink(sourceLink, "", n.Pos())
 		name := n.Name.Name
 		switch n := n.Type.(type) {
 		case *ast.InterfaceType:
 			for _, f := range n.Methods.List {
 				for _, n := range f.Names {
-					v.add(anchorAnnotation, name, n.Pos())
+					v.addLink(sourceLink, name, n.Pos())
 				}
 				ast.Walk(v, f.Type)
 			}
 		case *ast.StructType:
 			for _, f := range n.Fields.List {
 				for _, n := range f.Names {
-					v.add(anchorAnnotation, name, n.Pos())
+					v.addLink(sourceLink, name, n.Pos())
 				}
 				ast.Walk(v, f.Type)
 			}
@@ -316,7 +356,7 @@ func (v *declVisitor) Visit(n ast.Node) ast.Visitor {
 		if n.Recv != nil {
 			ast.Walk(v, n.Recv)
 		}
-		v.add(anchorAnnotation, "", n.Pos())
+		v.addLink(sourceLink, "", n.Pos())
 		ast.Walk(v, n.Type)
 	case *ast.Field:
 		for _ = range n.Names {
@@ -324,8 +364,8 @@ func (v *declVisitor) Visit(n ast.Node) ast.Visitor {
 		}
 		ast.Walk(v, n.Type)
 	case *ast.ValueSpec:
-		for _ = range n.Names {
-			v.add(anchorAnnotation, "", 0)
+		for _, n := range n.Names {
+			v.addLink(sourceLink, "", n.Pos())
 		}
 		if n.Type != nil {
 			ast.Walk(v, n.Type)
@@ -336,9 +376,9 @@ func (v *declVisitor) Visit(n ast.Node) ast.Visitor {
 	case *ast.Ident:
 		switch {
 		case n.Obj == nil && predeclared[n.Name] != notPredeclared:
-			v.add(builtinAnnotation, "", 0)
+			v.addLink(docLink, "builtin", 0)
 		case n.Obj != nil && ast.IsExported(n.Name):
-			v.add(linkAnnotation, "", 0)
+			v.addLink(docLink, "", 0)
 		default:
 			v.ignoreName()
 		}
@@ -351,11 +391,11 @@ func (v *declVisitor) Visit(n ast.Node) ast.Visitor {
 							v.ignoreName()
 							v.ignoreName()
 						} else if n.Sel.Pos()-x.End() == 1 {
-							v.add(linkBeginAnnotation, path, 0)
-							v.add(linkEndAnnotation, path, 0)
+							v.addLink(beginDocLink, path, 0)
+							v.addLink(endDocLink, path, 0)
 						} else {
-							v.add(packageLinkAnnotation, path, 0)
-							v.add(linkAnnotation, path, 0)
+							v.addLink(packageLink, path, 0)
+							v.addLink(docLink, path, 0)
 						}
 						return nil
 					}
