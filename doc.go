@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"go/ast"
+	"go/build"
 	"go/doc"
 	"go/printer"
 	"go/scanner"
@@ -19,17 +20,22 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
+
+const textWidth = 80
+const textIndent = "    "
 
 func init() {
 	var fs flag.FlagSet
+	hasConceal := fs.Bool("has_conceal", false, "")
 	commands["doc"] = &command{
 		fs: &fs,
-		do: func() { os.Exit(doDoc(os.Stdout, fs.Args())) },
+		do: func() { os.Exit(doDoc(os.Stdout, fs.Args(), *hasConceal)) },
 	}
 }
 
-func doDoc(out io.Writer, args []string) int {
+func doDoc(out io.Writer, args []string, hasConceal bool) int {
 	if len(args) != 1 {
 		fmt.Fprint(out, "one command line argument expected")
 		return 1
@@ -43,13 +49,13 @@ func doDoc(out io.Writer, args []string) int {
 	}
 
 	mode := doc.Mode(0)
-	if pkg.BPkg.ImportPath == "builtin" {
+	if pkg.bpkg.ImportPath == "builtin" {
 		mode |= doc.AllDecls
 	}
 
-	dpkg := doc.New(pkg.APkg, pkg.BPkg.ImportPath, mode)
+	dpkg := doc.New(pkg.apkg, pkg.bpkg.ImportPath, mode)
 
-	if pkg.BPkg.ImportPath == "builtin" {
+	if pkg.bpkg.ImportPath == "builtin" {
 		for _, t := range dpkg.Types {
 			dpkg.Funcs = append(dpkg.Funcs, t.Funcs...)
 			t.Funcs = nil
@@ -58,20 +64,22 @@ func doDoc(out io.Writer, args []string) int {
 	}
 
 	p := docPrinter{
-		dpkg:    dpkg,
-		fset:    pkg.FSet,
-		dir:     pkg.BPkg.Dir,
-		lineNum: 1,
-		index:   make(map[string]int),
+		fset:       pkg.fset,
+		dpkg:       dpkg,
+		bpkg:       pkg.bpkg,
+		hasConceal: hasConceal,
+		lineNum:    1,
+		index:      make(map[string]int),
 	}
 	p.execute(out)
 	return 0
 }
 
 type docPrinter struct {
-	fset *token.FileSet
-	dpkg *doc.Package
-	dir  string
+	fset       *token.FileSet
+	dpkg       *doc.Package
+	bpkg       *build.Package
+	hasConceal bool
 
 	// Output buffers
 	buf     bytes.Buffer
@@ -79,16 +87,21 @@ type docPrinter struct {
 
 	index map[string]int
 
-	// Fields used by currentLineColumn
-	lineNum  int
-	linePos  int
-	lineScan int
+	// Fields used by outputPosition
+	lineNum    int
+	lineOffset int
+	scanOffset int
 }
 
 func (p *docPrinter) execute(out io.Writer) {
 	fmt.Fprintf(&p.buf, "package %s\n_\n", p.dpkg.Name)
 	fmt.Fprintf(&p.buf, "    import \"%s\"\n\n", p.dpkg.ImportPath)
 	p.doc(p.dpkg.Doc)
+
+	p.buf.WriteString("FILES\n")
+	p.files(p.bpkg.GoFiles, p.bpkg.CgoFiles)
+	p.files(p.bpkg.TestGoFiles, p.bpkg.XTestGoFiles)
+	p.buf.WriteString("_\n")
 
 	p.head("CONSTANTS", len(p.dpkg.Consts))
 	p.values(p.dpkg.Consts)
@@ -108,6 +121,9 @@ func (p *docPrinter) execute(out io.Writer) {
 		p.funcs(d.Funcs)
 		p.funcs(d.Methods)
 	}
+
+	p.imports()
+
 	p.metaBuf.WriteString("D\n")
 	p.metaBuf.WriteTo(out)
 	p.buf.WriteTo(out)
@@ -148,7 +164,7 @@ func (p *docPrinter) decl(decl ast.Decl) {
 	base := file.Base()
 	s.Init(file, buf, nil, scanner.ScanComments)
 	lastOffset := 0
-	line, column := 0, 0
+	var startPos int64
 loop:
 	for {
 		pos, tok, lit := s.Scan()
@@ -167,11 +183,11 @@ loop:
 			v.links = v.links[1:]
 			switch a.kind {
 			case beginDocLink:
-				line, column = p.currentLineColumn()
+				startPos = p.outputPosition()
 				p.buf.WriteByte('|')
 				p.buf.WriteString(lit)
 			case docLink:
-				line, column = p.currentLineColumn()
+				startPos = p.outputPosition()
 				p.buf.WriteByte('|')
 				fallthrough
 			case endDocLink:
@@ -181,20 +197,20 @@ loop:
 				if a.data != "" {
 					file = "godoc://" + a.data
 				}
-				p.addTag(line, column, file, p.stringIndex(lit))
+				p.addTag(startPos, file, p.stringIndex(lit))
 			case packageLink:
-				line, column = p.currentLineColumn()
+				startPos = p.outputPosition()
 				p.buf.WriteByte('|')
 				p.buf.WriteString(lit)
 				p.buf.WriteByte('|')
-				p.addTag(line, column, "godoc://"+a.data, p.stringIndex("0"))
+				p.addTag(startPos, "godoc://"+a.data, p.stringIndex("0"))
 			case sourceLink:
-				line, column = p.currentLineColumn()
-				p.buf.WriteByte('!')
+				startPos = p.outputPosition()
+				p.buf.WriteByte('|')
 				p.buf.WriteString(lit)
-				p.buf.WriteByte('!')
+				p.buf.WriteByte('|')
 				position := p.fset.Position(a.pos)
-				p.addTag(line, column, filepath.Join(p.dir, position.Filename), -position.Line)
+				p.addTag(startPos, filepath.Join(p.bpkg.Dir, position.Filename), -position.Line)
 			default:
 				p.buf.WriteString(lit)
 			}
@@ -207,13 +223,47 @@ loop:
 func (p *docPrinter) doc(s string) {
 	s = strings.TrimRight(s, " \t\n")
 	if s != "" {
-		doc.ToText(&p.buf, s, "    ", "      ", 80)
+		doc.ToText(&p.buf, s, textIndent, textIndent+"   ", textWidth)
 		b := p.buf.Bytes()
 		if b[len(b)-1] != '\n' {
 			p.buf.WriteByte('\n')
 		}
 		p.buf.WriteByte('\n')
 	}
+}
+
+func (p *docPrinter) files(sets ...[]string) {
+	var fnames []string
+	for _, set := range sets {
+		fnames = append(fnames, set...)
+	}
+	if len(fnames) == 0 {
+		return
+	}
+
+	sort.Strings(fnames)
+
+	col := 0
+	p.buf.WriteByte('\n')
+	p.buf.WriteString(textIndent)
+	for _, fname := range fnames {
+		n := utf8.RuneCountInString(fname)
+		if col != 0 {
+			if col+n+3 > textWidth {
+				col = 0
+				p.buf.WriteByte('\n')
+				p.buf.WriteString(textIndent)
+			} else {
+				col += 1
+				p.buf.WriteByte(' ')
+			}
+		}
+		startPos := p.outputPosition()
+		p.buf.WriteString(fname)
+		p.addTag(startPos, filepath.Join(p.bpkg.Dir, fname), p.stringIndex(""))
+		col += n + 2
+	}
+	p.buf.WriteString("\n")
 }
 
 func (p *docPrinter) head(title string, n int) {
@@ -236,9 +286,23 @@ func (p *docPrinter) funcs(values []*doc.Func) {
 	}
 }
 
-func (p *docPrinter) addTag(line int, start int, file string, address int) {
-	_, end := p.currentLineColumn()
-	fmt.Fprintf(&p.metaBuf, "T %d %d %d %d %d\n", line, start, end, p.stringIndex(file), address)
+func (p *docPrinter) imports() {
+	if len(p.bpkg.Imports) == 0 {
+		return
+	}
+	p.buf.WriteString("IMPORTS\n\n")
+	for _, imp := range p.bpkg.Imports {
+		p.buf.WriteString(textIndent)
+		startPos := p.outputPosition()
+		p.buf.WriteString(imp)
+		p.addTag(startPos, "godoc://"+imp, p.stringIndex("0"))
+		p.buf.WriteByte('\n')
+	}
+	p.buf.WriteString("_\n")
+}
+
+func (p *docPrinter) addTag(startPos int64, file string, address int) {
+	fmt.Fprintf(&p.metaBuf, "T %d %d %d %d\n", startPos, p.outputPosition(), p.stringIndex(file), address)
 }
 
 func (p *docPrinter) stringIndex(s string) int {
@@ -251,16 +315,16 @@ func (p *docPrinter) stringIndex(s string) int {
 	return i
 }
 
-func (p *docPrinter) currentLineColumn() (int, int) {
+func (p *docPrinter) outputPosition() int64 {
 	b := p.buf.Bytes()
-	for i, c := range b[p.lineScan:] {
+	for i, c := range b[p.scanOffset:] {
 		if c == '\n' {
 			p.lineNum += 1
-			p.linePos = p.lineScan + i
+			p.lineOffset = p.scanOffset + i
 		}
 	}
-	p.lineScan = len(b)
-	return p.lineNum, len(b) - p.linePos
+	p.scanOffset = len(b)
+	return int64(p.lineNum)*10000 + int64(len(b)-p.lineOffset)
 }
 
 const (

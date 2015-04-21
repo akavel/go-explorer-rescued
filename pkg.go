@@ -25,7 +25,7 @@ type builder struct {
 var linePat = regexp.MustCompile(`(?m)^//line .*$`)
 
 func (b *builder) parseFile(name string) (*ast.File, error) {
-	p, err := ioutil.ReadFile(filepath.Join(b.pkg.BPkg.Dir, name))
+	p, err := ioutil.ReadFile(filepath.Join(b.pkg.bpkg.Dir, name))
 	if err != nil {
 		return nil, err
 	}
@@ -35,7 +35,7 @@ func (b *builder) parseFile(name string) (*ast.File, error) {
 			p[i] = ' '
 		}
 	}
-	return parser.ParseFile(b.pkg.FSet, name, p, parser.ParseComments)
+	return parser.ParseFile(b.pkg.fset, name, p, parser.ParseComments)
 }
 
 func simpleImporter(imports map[string]*ast.Object, path string) (*ast.Object, error) {
@@ -56,14 +56,14 @@ func simpleImporter(imports map[string]*ast.Object, path string) (*ast.Object, e
 }
 
 type Package struct {
-	FSet *token.FileSet
+	fset *token.FileSet
 
-	BPkg *build.Package
+	bpkg *build.Package
 
-	APkg *ast.Package
+	apkg *ast.Package
 
-	// Errors found when fetching or parsing this package.
-	Errors []error
+	// errors found when fetching or parsing this package.
+	errors []error
 }
 
 func loadPackage(importPath string) (*Package, error) {
@@ -71,28 +71,28 @@ func loadPackage(importPath string) (*Package, error) {
 	var pkg Package
 	b := builder{pkg: &pkg}
 
-	pkg.FSet = token.NewFileSet()
-	pkg.BPkg, err = build.Import(importPath, *cwd, 0)
+	pkg.fset = token.NewFileSet()
+	pkg.bpkg, err = build.Import(importPath, *cwd, 0)
 	if err != nil {
 		return nil, err
 	}
 
 	files := make(map[string]*ast.File)
-	for _, name := range append(pkg.BPkg.GoFiles, pkg.BPkg.CgoFiles...) {
+	for _, name := range append(pkg.bpkg.GoFiles, pkg.bpkg.CgoFiles...) {
 		file, err := b.parseFile(name)
 		if err != nil {
-			pkg.Errors = append(pkg.Errors, err)
+			pkg.errors = append(pkg.errors, err)
 			continue
 		}
 		files[name] = file
 	}
 
-	pkg.APkg, _ = ast.NewPackage(pkg.FSet, files, simpleImporter, nil)
+	pkg.apkg, _ = ast.NewPackage(pkg.fset, files, simpleImporter, nil)
 
-	for _, name := range append(pkg.BPkg.TestGoFiles, pkg.BPkg.XTestGoFiles...) {
+	for _, name := range append(pkg.bpkg.TestGoFiles, pkg.bpkg.XTestGoFiles...) {
 		file, err := b.parseFile(name)
 		if err != nil {
-			pkg.Errors = append(pkg.Errors, err)
+			pkg.errors = append(pkg.errors, err)
 			continue
 		}
 		b.examples = append(b.examples, doc.Examples(file)...)
