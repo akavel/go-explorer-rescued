@@ -9,8 +9,7 @@ function! ge#doc#read()
     let b:strings = []
     let b:links = []
     let b:anchors = {}
-    let cmd = 'getool doc ' . expand('%')
-    let out = split(system(cmd), "\n", 1)
+    let out = ge#tool#runl('', 'doc', expand('%'))
 
     if v:shell_error
         call append(0, out)
@@ -42,16 +41,45 @@ function! ge#doc#read()
             break
         endif
     endwhile
-    setlocal buftype=nofile bufhidden=hide noswapfile nomodifiable readonly
+    setlocal buftype=nofile bufhidden=hide noswapfile nomodifiable readonly tabstop=4
     setfiletype godoc
-    silent normal! gg
-    nnoremap <buffer> <silent> <c-]> :call <SID>doc_jump()<CR>
-    nnoremap <buffer> <silent> <c-t> :call <SID>doc_pop()<CR>
-    nnoremap <buffer> <silent> ]] :call <SID>doc_next_section('')<CR>
-    nnoremap <buffer> <silent> [[ :call <SID>doc_next_section('b')<CR>
+    silent 0
+    nnoremap <buffer> <silent> <c-]> :call <SID>jump()<CR>
+    nnoremap <buffer> <silent> <c-t> :call <SID>pop()<CR>
+    nnoremap <buffer> <silent> ]] :call <SID>next_section('')<CR>
+    nnoremap <buffer> <silent> [[ :call <SID>next_section('b')<CR>
+    autocmd! * <buffer>
+    autocmd BufWinEnter <buffer> call s:update_highlight()
+    autocmd BufWinLeave <buffer> call s:clear_highlight()
+    autocmd CursorMoved <buffer> call s:update_highlight()
 endfunction
 
-function! s:doc_link()
+function! s:update_highlight()
+    let link = s:link()
+    if exists('w:highlight_link') && w:highlight_link == link
+        return
+    endif
+    let w:highlight_link = link
+    if exists('w:highlight_match') && w:highlight_match
+        call matchdelete(w:highlight_match)
+        let w:highlight_match = 0
+    endif
+    if len(link) == 0
+        return
+    endif
+    let w:highlight_match = matchadd('Underlined', '\%' . link[0] / 10000 . 'l\%' . link[0] % 10000 . 'c.\{' . (link[1] - link[0]) . '\}')
+endfunction
+
+function! s:clear_highlight()
+    if exists('w:highlight_match') && w:highlight_match
+        call matchdelete(w:highlight_match)
+    endif
+    let w:highlight_match = 0
+    let w:highlight_link = []
+endfunction
+
+" link returns the link under the cursor or []
+function! s:link()
     let p = line('.') * 10000 + col('.')
     for t in b:links
         if p >= t[0]
@@ -65,10 +93,10 @@ function! s:doc_link()
     return []
 endfunction
 
-let s:doc_stack = []
+let s:stack = []
 
-function <SID>doc_jump()
-    let link = s:doc_link()
+function <SID>jump()
+    let link = s:link()
     if len(link) == 0
         return
     endif
@@ -77,7 +105,7 @@ function <SID>doc_jump()
         let name = b:strings[link[3]]
     endif
     if file == "" || match(file, '^godoc://') == 0
-        let s:doc_stack = add(s:doc_stack, [bufnr('%'), line('.'), col('.')])
+        let s:stack = add(s:stack, [bufnr('%'), line('.'), col('.')])
     endif
     if file != ""
         execute 'edit ' . file
@@ -94,18 +122,18 @@ function <SID>doc_jump()
     endif
 endfunction
 
-function <SID>doc_pop()
-    if len(s:doc_stack) == 0
+function <SID>pop()
+    if len(s:stack) == 0
         return
     endif
-    let p = s:doc_stack[-1]
-    let s:doc_stack = s:doc_stack[:-2]
+    let p = s:stack[-1]
+    let s:stack = s:stack[:-2]
     exec p[0] . 'b'
     exec p[1]
     exec 'normal! ' . p[2] . '|'
 endfunction
-  
-function <SID>doc_next_section(dir)
+
+function <SID>next_section(dir)
     call search('\C\v^[^ )}]', 'W' . a:dir)
 endfunction
 

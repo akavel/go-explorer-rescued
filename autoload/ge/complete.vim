@@ -15,11 +15,11 @@ function! s:import_text()
 endfunction
 
 function! ge#complete#complete(arg, line, pos)
-    return split(system('getool complete ' . shellescape(a:arg) . ' ' . shellescape(a:line) . ' ' . shellescape(a:pos), s:import_text()))
+    return ge#tool#runl(s:import_text(), 'complete', a:arg, a:line, a:pos)
 endfunction
 
 function! ge#complete#resolve(arg)
-    return system('getool resolve ' . shellescape(a:arg), s:import_text())
+    return ge#tool#run(s:import_text(), 'resolve', a:arg)
 endfunction
 
 " vim:ts=4:sw=4:et

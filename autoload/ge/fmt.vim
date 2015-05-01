@@ -8,13 +8,7 @@
 " the location list of error_list is equal to 'l'.
 function! ge#fmt#format(error_list, with_goimports)
     let buf = join(getline(1, '$'), "\n")
-    let cmd = 'getool fmt '
-    if a:with_goimports
-        let cmd = cmd . '-goimport '
-    endif
-    let cmd = cmd . expand('%')
-    let out = split(system(cmd, buf), "\n", 1)
-
+    let out = ge#tool#runl(buf, 'fmt', '-goimport=' . a:with_goimports, expand('%:p'))
     if out[0] ==# 'ERR'
         if a:error_list ==# 'c'
             cexpr out[1:]

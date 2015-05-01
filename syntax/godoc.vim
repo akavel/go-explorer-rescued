@@ -7,19 +7,16 @@ if exists('b:current_syntax')
 endif
 
 syntax case match
-syntax match godocHead '\C^[A-Z]\+$'
-
-"syntax region godocDecl start='^\(package\|const\|var\|func\|type\) ' end='$' keepend contains=godocComment
-"syntax region godocDecl start='^\(const\|var\) (' end='^)$' keepend contains=godocComment
-
 syntax region godocDecl start='^\(package\|const\|var\|func\|type\) ' end='^$' contains=godocComment,godocParen,godocBrace
-syntax region godocParen start='(' end=')' keepend contained contains=godocComment,godocParen,godocBrace
-syntax region godocBrace start='{' end='}' keepend contained contains=godocComment,godocParen,godocBrace
-
-syntax region godocDecl start='^type \S\+ \(interface\|struct\)' end='^}$' keepend contains=godocComment
-
+syntax region godocParen start='(' end=')' contained contains=godocComment,godocParen,godocBrace
+syntax region godocBrace start='{' end='}' contained contains=godocComment,godocParen,godocBrace
 syntax region godocComment start='/\*' end='\*/'  contained
 syntax region godocComment start='//' end='$' contained
+
+syntax match godocHead '^\n\n    [^\t ].*\n$'
+syntax match godocHead '^\n[^\t a-z].*\n$'
+
+syntax sync fromstart
 
 highlight link godocComment Comment
 highlight link godocHead Constant

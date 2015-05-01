@@ -3,9 +3,9 @@ if exists('g:loaded_ge')
 endif
 let g:loaded_ge = 1
 
-augroup ge_files
+augroup ge_doc
     autocmd!
-    autocmd BufReadCmd  godoc://** exe ge#doc#read()
+    autocmd BufReadCmd  godoc://** call ge#doc#read()
 augroup END
 
 command! -nargs=* -range -complete=customlist,ge#complete#complete GeDoc :call s:doc(<f-args>)
