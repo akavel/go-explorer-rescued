@@ -9,7 +9,7 @@
 //  ./relpath   - Relative path.
 //  name        - Name of imported package.
 //
-// The complete and resolve commands silently ignore errors. It is assume that
+// The complete and resolve commands silently ignore errors. It is assumed that
 // downstream uses of the command results will detect and handle errors in some
 // way.
 
@@ -96,7 +96,7 @@ func completePackage(in io.Reader, arg string) (completions []string) {
 }
 
 func completeID(importPath string, arg string) (completions []string) {
-	return nil
+	return completions
 }
 
 func resolvePackageSpec(in io.Reader, spec string) string {

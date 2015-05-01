@@ -17,10 +17,13 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -40,44 +43,40 @@ func doDoc(out io.Writer, args []string) int {
 		fmt.Fprint(out, "one command line argument expected")
 		return 1
 	}
-	importPath := args[0]
+
+	importPath := filepath.ToSlash(args[0])
 	importPath = strings.TrimPrefix(importPath, "godoc://")
-	pkg, err := loadPackage(importPath)
-	if err != nil {
-		fmt.Fprint(out, err)
-		return 1
-	}
-
-	mode := doc.Mode(0)
-	if pkg.bpkg.ImportPath == "builtin" {
-		mode |= doc.AllDecls
-	}
-
-	dpkg := doc.New(pkg.apkg, pkg.bpkg.ImportPath, mode)
-
-	if pkg.bpkg.ImportPath == "builtin" {
-		for _, t := range dpkg.Types {
-			dpkg.Funcs = append(dpkg.Funcs, t.Funcs...)
-			t.Funcs = nil
-		}
-		sort.Sort(byFuncName(dpkg.Funcs))
-	}
 
 	p := docPrinter{
-		fset:    pkg.fset,
-		dpkg:    dpkg,
-		bpkg:    pkg.bpkg,
-		lineNum: 1,
-		index:   make(map[string]int),
+		importPath: importPath,
+		lineNum:    1,
+		lineOffset: -1,
+		index:      make(map[string]int),
 	}
+
+	if importPath != "" {
+		pkg, err := loadPackage(importPath, loadDoc|loadExamples)
+		if err != nil {
+			fmt.Fprint(out, err)
+			return 1
+		}
+		p.bpkg = pkg.bpkg
+		p.dpkg = pkg.dpkg
+		p.fset = pkg.fset
+		p.examples = pkg.examples
+	}
+
 	p.execute(out)
 	return 0
 }
 
 type docPrinter struct {
-	fset *token.FileSet
-	dpkg *doc.Package
-	bpkg *build.Package
+	importPath string
+	fset       *token.FileSet
+	bpkg       *build.Package
+	dpkg       *doc.Package
+
+	examples []*doc.Example
 
 	// Output buffers
 	buf     bytes.Buffer
@@ -92,36 +91,79 @@ type docPrinter struct {
 }
 
 func (p *docPrinter) execute(out io.Writer) {
-	fmt.Fprintf(&p.buf, "package %s\n\n", p.dpkg.Name)
-	fmt.Fprintf(&p.buf, "    import \"%s\"\n\n", p.dpkg.ImportPath)
-	p.doc(p.dpkg.Doc)
+	switch {
+	case p.importPath == "":
+		// root
+	case p.dpkg == nil:
+		p.buf.WriteString("Directory ")
+		p.printLink(path.Base(p.importPath), p.bpkg.Dir, p.stringAddress(""))
+		p.buf.WriteString("\n\n")
+	case p.dpkg.Name == "main":
+		p.buf.WriteString("Command ")
+		p.printLink(path.Base(p.importPath), p.bpkg.Dir, p.stringAddress(""))
+		p.buf.WriteString("\n\n")
+		p.printText(p.dpkg.Doc)
+	default:
+		p.buf.WriteString("package ")
+		p.printLink(p.dpkg.Name, p.bpkg.Dir, p.stringAddress(""))
+		p.buf.WriteString("\n\n" + textIndent + "import \"")
+		p.buf.WriteString(p.dpkg.ImportPath)
+		p.buf.WriteString("\"\n\n")
+		p.printText(p.dpkg.Doc)
+		p.printExamples("")
 
-	p.buf.WriteString("FILES\n")
-	p.files(p.bpkg.GoFiles, p.bpkg.CgoFiles)
-	p.files(p.bpkg.TestGoFiles, p.bpkg.XTestGoFiles)
-	p.buf.WriteString("\n")
+		p.buf.WriteString("FILES\n")
+		p.printFiles(p.bpkg.GoFiles, p.bpkg.CgoFiles)
+		p.printFiles(p.bpkg.TestGoFiles, p.bpkg.XTestGoFiles)
+		p.buf.WriteString("\n")
 
-	p.head("CONSTANTS", len(p.dpkg.Consts))
-	p.values(p.dpkg.Consts)
+		if len(p.dpkg.Consts) > 0 {
+			p.buf.WriteString("CONSTANTS\n\n")
+			p.printValues(p.dpkg.Consts)
+		}
 
-	p.head("VARIABLES", len(p.dpkg.Vars))
-	p.values(p.dpkg.Vars)
+		if len(p.dpkg.Vars) > 0 {
+			p.buf.WriteString("VARIABLES\n\n")
+			p.printValues(p.dpkg.Vars)
+		}
 
-	p.head("FUNCTIONS", len(p.dpkg.Funcs))
-	p.funcs(p.dpkg.Funcs)
+		if len(p.dpkg.Funcs) > 0 {
+			p.buf.WriteString("FUNCTIONS\n\n")
+			p.printFuncs(p.dpkg.Funcs, "")
+		}
 
-	p.head("TYPES", len(p.dpkg.Types))
-	for _, d := range p.dpkg.Types {
-		p.decl(d.Decl)
-		p.doc(d.Doc)
-		p.values(d.Consts)
-		p.values(d.Vars)
-		p.funcs(d.Funcs)
-		p.funcs(d.Methods)
+		if len(p.dpkg.Types) > 0 {
+			p.buf.WriteString("TYPES\n\n")
+			for _, d := range p.dpkg.Types {
+				p.printDecl(d.Decl)
+				p.printText(d.Doc)
+				p.printExamples(d.Name)
+				p.printValues(d.Consts)
+				p.printValues(d.Vars)
+				p.printFuncs(d.Funcs, "")
+				p.printFuncs(d.Methods, d.Name+"_")
+			}
+		}
+
+		p.printImports()
 	}
 
-	p.imports()
-	p.dirs()
+	if p.importPath != "" {
+		p.buf.WriteString("DIRECTORIES\n\n")
+		p.buf.WriteString(textIndent)
+		up := path.Dir(p.importPath)
+		if up == "." {
+			up = ""
+		}
+		p.printLink("..", "godoc://"+up, p.stringAddress(""))
+		p.buf.WriteString(" (up a directory)\n")
+		p.printDirs(append(filepath.SplitList(build.Default.GOPATH), build.Default.GOROOT))
+	} else {
+		p.buf.WriteString("\n\nStandard Packages\n\n")
+		p.printDirs([]string{build.Default.GOROOT})
+		p.buf.WriteString("\n\nThird Party Packages\n\n")
+		p.printDirs(filepath.SplitList(build.Default.GOPATH))
+	}
 
 	p.metaBuf.WriteString("D\n")
 	p.metaBuf.WriteTo(out)
@@ -143,11 +185,11 @@ type annotation struct {
 	pos  token.Pos
 }
 
-func (p *docPrinter) decl(decl ast.Decl) {
+func (p *docPrinter) printDecl(decl ast.Decl) {
 	v := &declVisitor{}
 	ast.Walk(v, decl)
 	var w bytes.Buffer
-	err := (&printer.Config{Mode: printer.UseSpaces, Tabwidth: 4}).Fprint(
+	err := (&printer.Config{Tabwidth: 4}).Fprint(
 		&w,
 		p.fset,
 		&printer.CommentedNode{Node: decl, Comments: v.comments})
@@ -188,22 +230,18 @@ loop:
 				startPos = p.adjustedOutputPosition()
 				fallthrough
 			case endLinkAnnotation:
-				p.buf.WriteString(lit)
 				file := ""
 				if a.data != "" {
 					file = "godoc://" + a.data
 				}
+				p.buf.WriteString(lit)
 				p.addLink(startPos, file, p.stringAddress(lit))
 			case packageLinkAnnoation:
-				startPos = p.outputPosition()
-				p.buf.WriteString(lit)
-				p.addLink(startPos, "godoc://"+a.data, p.stringAddress(""))
+				p.printLink(lit, "godoc://"+a.data, p.stringAddress(""))
 			case anchorAnnotation:
-				startPos = p.outputPosition()
-				p.buf.WriteString(lit)
-				p.addAnchor(startPos, lit, a.data)
+				p.addAnchor(lit, a.data)
 				position := p.fset.Position(a.pos)
-				p.addLink(startPos,
+				p.printLink(lit,
 					filepath.Join(p.bpkg.Dir, position.Filename),
 					-p.lineColumnAddress(position.Line, position.Column))
 			default:
@@ -215,10 +253,10 @@ loop:
 	p.buf.WriteString("\n\n")
 }
 
-func (p *docPrinter) doc(s string) {
+func (p *docPrinter) printText(s string) {
 	s = strings.TrimRight(s, " \t\n")
 	if s != "" {
-		doc.ToText(&p.buf, s, textIndent, textIndent+"   ", textWidth)
+		doc.ToText(&p.buf, s, textIndent, textIndent+"\t", textWidth)
 		b := p.buf.Bytes()
 		if b[len(b)-1] != '\n' {
 			p.buf.WriteByte('\n')
@@ -227,7 +265,70 @@ func (p *docPrinter) doc(s string) {
 	}
 }
 
-func (p *docPrinter) files(sets ...[]string) {
+var exampleOutputRx = regexp.MustCompile(`(?i)//[[:space:]]*output:`)
+
+func (p *docPrinter) printExamples(name string) {
+	for _, e := range p.examples {
+		if !strings.HasPrefix(e.Name, name) {
+			continue
+		}
+		name := e.Name[len(name):]
+		if name != "" {
+			if i := strings.LastIndex(name, "_"); i != 0 {
+				continue
+			}
+			name = name[1:]
+			if r, _ := utf8.DecodeRuneInString(name); unicode.IsUpper(r) {
+				continue
+			}
+			name = strings.Title(name)
+		}
+
+		var node interface{}
+		if _, ok := e.Code.(*ast.File); ok {
+			node = e.Play
+		} else {
+			node = &printer.CommentedNode{Node: e.Code, Comments: e.Comments}
+		}
+
+		var buf bytes.Buffer
+		err := (&printer.Config{Tabwidth: 4}).Fprint(&buf, p.fset, node)
+		if err != nil {
+			continue
+		}
+
+		// Additional formatting if this is a function body.
+		b := buf.Bytes()
+		if i := len(b); i >= 2 && b[0] == '{' && b[i-1] == '}' {
+			// Remove surrounding braces.
+			b = b[1 : i-1]
+			// Unindent
+			b = bytes.Replace(b, []byte("\n    "), []byte("\n"), -1)
+			// Remove output comment
+			if j := exampleOutputRx.FindIndex(b); j != nil {
+				b = bytes.TrimSpace(b[:j[0]])
+			}
+		} else {
+			// Drop output, as the output comment will appear in the code
+			e.Output = ""
+		}
+
+		// Hide examples for now. I tried displaying comments inline and folded
+		// and found them both distracting. Consider includling link from doc
+		// to examples at the end of the page.
+		/*
+			p.buf.Write(b)
+			p.buf.WriteByte('\n')
+			if e.Output != "" {
+				p.buf.WriteString(e.Output)
+				buf.WriteByte('\n')
+			}
+			p.buf.WriteByte('\n')
+		*/
+	}
+}
+
+func (p *docPrinter) printFiles(sets ...[]string) {
 	var fnames []string
 	for _, set := range sets {
 		fnames = append(fnames, set...)
@@ -253,35 +354,28 @@ func (p *docPrinter) files(sets ...[]string) {
 				p.buf.WriteByte(' ')
 			}
 		}
-		startPos := p.outputPosition()
-		p.buf.WriteString(fname)
-		p.addLink(startPos, filepath.Join(p.bpkg.Dir, fname), p.stringAddress(""))
+		p.printLink(fname, filepath.Join(p.bpkg.Dir, fname), p.stringAddress(""))
 		col += n + 2
 	}
 	p.buf.WriteString("\n")
 }
 
-func (p *docPrinter) head(title string, n int) {
-	if n > 0 {
-		fmt.Fprintf(&p.buf, "%s\n\n", title)
-	}
-}
-
-func (p *docPrinter) values(values []*doc.Value) {
+func (p *docPrinter) printValues(values []*doc.Value) {
 	for _, d := range values {
-		p.decl(d.Decl)
-		p.doc(d.Doc)
+		p.printDecl(d.Decl)
+		p.printText(d.Doc)
 	}
 }
 
-func (p *docPrinter) funcs(values []*doc.Func) {
+func (p *docPrinter) printFuncs(values []*doc.Func, examplePrefix string) {
 	for _, d := range values {
-		p.decl(d.Decl)
-		p.doc(d.Doc)
+		p.printDecl(d.Decl)
+		p.printText(d.Doc)
+		p.printExamples(examplePrefix + d.Name)
 	}
 }
 
-func (p *docPrinter) imports() {
+func (p *docPrinter) printImports() {
 	if len(p.bpkg.Imports) == 0 {
 		return
 	}
@@ -296,41 +390,52 @@ func (p *docPrinter) imports() {
 	p.buf.WriteString("\n")
 }
 
-func (p *docPrinter) dirs() {
-	fis, err := ioutil.ReadDir(p.bpkg.Dir)
-	if err != nil {
-		return
-	}
-
-	head := false
-	for _, fi := range fis {
-		if !fi.IsDir() || strings.HasPrefix(fi.Name(), ".") {
+func (p *docPrinter) printDirs(roots []string) {
+	m := map[string]bool{}
+	for _, root := range roots {
+		dir := filepath.Join(root, "src", filepath.FromSlash(p.importPath))
+		fis, err := ioutil.ReadDir(dir)
+		if err != nil {
 			continue
 		}
-		if !head {
-			head = true
-			p.buf.WriteString("SUBDIRECTORIES\n\n")
+		for _, fi := range fis {
+			if !fi.IsDir() || strings.HasPrefix(fi.Name(), ".") {
+				continue
+			}
+			m[fi.Name()] = true
 		}
+	}
+
+	var names []string
+	for name := range m {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
 		p.buf.WriteString(textIndent)
 		startPos := p.outputPosition()
-		p.buf.WriteString(fi.Name())
-		p.addLink(startPos, "godoc://"+p.bpkg.ImportPath+"/"+fi.Name(), p.stringAddress(""))
+		p.buf.WriteString(name)
+		p.addLink(startPos, "godoc://"+path.Join(p.importPath, name), p.stringAddress(""))
 		p.buf.WriteByte('\n')
 	}
-	if head {
-		p.buf.WriteString("\n")
-	}
+}
+
+func (p *docPrinter) printLink(s string, file string, address int64) {
+	startPos := p.outputPosition()
+	p.buf.WriteString(s)
+	p.addLink(startPos, file, address)
 }
 
 func (p *docPrinter) addLink(startPos int64, file string, address int64) {
 	fmt.Fprintf(&p.metaBuf, "L %d %d %d %d\n", startPos, p.outputPosition(), p.stringAddress(file), address)
 }
 
-func (p *docPrinter) addAnchor(startPos int64, name, typeName string) {
+func (p *docPrinter) addAnchor(name, typeName string) {
 	if typeName != "" {
 		name = typeName + "." + name
 	}
-	fmt.Fprintf(&p.metaBuf, "A %d %s\n", startPos, name)
+	fmt.Fprintf(&p.metaBuf, "A %d %s\n", p.outputPosition(), name)
 }
 
 func (p *docPrinter) stringAddress(s string) int64 {
@@ -364,15 +469,8 @@ func (p *docPrinter) adjustedOutputPosition() int64 {
 	b = bytes.TrimSuffix(b, []byte{'*'})
 	b = bytes.TrimSuffix(b, []byte{'[', ']'})
 	b = bytes.TrimSuffix(b, []byte{'*'})
+	b = bytes.TrimSuffix(b, []byte{'&'})
 	return p.outputPosition() - int64(p.buf.Len()-len(b))
-}
-
-func (p *docPrinter) afterStar() bool {
-	b := p.buf.Bytes()
-	if len(b) == 0 {
-		return false
-	}
-	return b[len(b)-1] == '*'
 }
 
 const (
@@ -468,7 +566,7 @@ func (v *declVisitor) Visit(n ast.Node) ast.Visitor {
 		if n.Recv != nil {
 			ast.Walk(v, n.Recv)
 		}
-		v.addAnnoation(anchorAnnotation, "", n.Pos())
+		v.addAnnoation(anchorAnnotation, "", n.Name.NamePos)
 		ast.Walk(v, n.Type)
 	case *ast.Field:
 		for _ = range n.Names {
