@@ -7,14 +7,16 @@ if exists('b:current_syntax')
 endif
 
 syntax case match
-syntax region godocDecl start='^\(package\|const\|var\|func\|type\) ' end='^$' contains=godocComment,godocParen,godocBrace
+syntax region godocSection start='^[^ \t)}]' end='^[^ \t)}]'me=e-1 fold contains=godocDecl,godocHead
+
+syntax region godocDecl start='^\(package\|const\|var\|func\|type\) ' end='^$' contained contains=godocComment,godocParen,godocBrace
 syntax region godocParen start='(' end=')' contained contains=godocComment,godocParen,godocBrace
 syntax region godocBrace start='{' end='}' contained contains=godocComment,godocParen,godocBrace
 syntax region godocComment start='/\*' end='\*/'  contained
 syntax region godocComment start='//' end='$' contained
 
-syntax match godocHead '^\n\n    [^\t ].*\n$'
-syntax match godocHead '^\n[^\t a-z].*\n$'
+syntax match godocHead '\n\n\n    [^\t ].*$' contained
+syntax match godocHead '^[A-Z].*$' contained
 
 syntax sync fromstart
 

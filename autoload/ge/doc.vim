@@ -28,12 +28,12 @@ function! ge#doc#read()
         endif
         let m = matchlist(line, '\C\v^L ([0-9]+) ([0-9]+) ([0-9]+) ([-0-9]+)$')
         if len(m)
-            call add(b:links, [m[1] + 0, m[2] + 0, m[3] + 0, m[4] + 0])
+            call add(b:links, [str2nr(m[1]), str2nr(m[2]), str2nr(m[3]), str2nr(m[4])])
             continue
         endif
         let m = matchlist(line, '\C\v^A ([0-9]+) (\S+)$')
         if len(m)
-            let b:anchors[m[2]] = m[1]
+            let b:anchors[m[2]] = str2nr(m[1])
             continue
         endif
          if line ==# 'D'
@@ -41,6 +41,7 @@ function! ge#doc#read()
             break
         endif
     endwhile
+    setlocal foldmethod=syntax foldlevel=1 foldtext=ge#doc#foldtext()
     setlocal buftype=nofile bufhidden=hide noswapfile nomodifiable readonly tabstop=4
     setfiletype godoc
     silent 0
@@ -48,6 +49,7 @@ function! ge#doc#read()
     nnoremap <buffer> <silent> <c-t> :call <SID>pop()<CR>
     nnoremap <buffer> <silent> ]] :call <SID>next_section('')<CR>
     nnoremap <buffer> <silent> [[ :call <SID>next_section('b')<CR>
+    noremap <buffer> <silent> <2-LeftMouse> :call <SID>jump()<CR>
     autocmd! * <buffer>
     autocmd BufWinEnter <buffer> call s:update_highlight()
     autocmd BufWinLeave <buffer> call s:clear_highlight()
@@ -134,7 +136,30 @@ function <SID>pop()
 endfunction
 
 function <SID>next_section(dir)
-    call search('\C\v^[^ )}]', 'W' . a:dir)
+    call search('\C\v^[^ \t)}]', 'W' . a:dir)
+endfunction
+
+function ge#doc#foldtext()
+    let line = getline(v:foldstart)
+    let m = matchlist(line, '\C\v^(var|const) ')
+    if len(m)
+        " show sorted list of constants and variables
+        let start=10000 * v:foldstart
+        let end = 10000 * v:foldend+1
+        let ids = []
+        for [id, pos] in items(b:anchors)
+            if pos >= start && pos < end
+                call add(ids, id)
+            endif
+        endfor
+        sort(ids)
+        return m[1] . ' ' . join(ids) . ' '
+    endif
+    if line[-2:] == ' {'
+        " chop { following a struct or interface
+        let line = line[:-3]
+    endif
+    return line . ' '
 endfunction
 
 " vim:ts=4:sw=4:et
