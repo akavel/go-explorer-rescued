@@ -26,6 +26,6 @@ highlight link godocDecl Type
 highlight link godocParen Type
 highlight link godocBrace Type
 
-let b:current_syntax = 'godoc'
+let b:current_syntax = 'gedoc'
 
 " vim:ts=4 sts=2 sw=2:

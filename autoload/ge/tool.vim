@@ -2,7 +2,12 @@
 " Use of this source code is governed by a BSD-style
 " license that can be found in the LICENSE file.
 
-function! s:getool()
+function! s:throw(string) abort
+  let v:errmsg = 'go-explorer: ' . a:string
+  throw v:errmsg
+endfunction
+
+function! s:tool_binary() abort
     if executable('getool')
         return 'getool'
     endif
@@ -17,40 +22,45 @@ function! s:getool()
         endif
     endfor
 
-    let cmd = $GOBIN . sep . 'getool'
-    if executable(cmd)
-        return cmd
+    let bin = $GOBIN . sep . 'getool'
+    if executable(bin)
+        return bin
     endif
 
     for path in split($GOPATH, list_sep)
-        let cmd = path . sep . 'bin' . sep . 'getool'
-        if executable(cmd)
-            return cmd
+        let bin = path . sep . 'bin' . sep . 'getool'
+        if executable(bin)
+            return bin
         endif
     endfor
 
-    return 'getool'
+    call s:throw('getool not found, run "go get -u github.com/garyburd/go-explorer/src/getool" to install')
 endfunction
 
-function! s:run(input, args)
-    let cmd = s:getool()
+function! s:run(input, args) abort
+    let cmd = s:tool_binary()
     for arg in a:args
         let cmd = cmd . ' ' . shellescape(arg)
     endfor
     if a:input == ''
-        return system(cmd)
+        let result = system(cmd)
+    else
+        let result = system(cmd, a:input)
     endif
-    return system(cmd, a:input)
+    if v:shell_error
+        call s:throw(result)
+    endif
+    return result
 endfunction
 
-" run returns output of running getool with arguments ... and stdin set to
+" run returns output of running tool_binary with arguments ... and stdin set to
 " input.
-function ge#tool#run(input, ...)
+function ge#tool#run(input, ...) abort
     return s:run(a:input, a:000)
 endfunction
 
 " runl is like run, but returns output as a list.
-function ge#tool#runl(input, ...)
+function ge#tool#runl(input, ...) abort
     return split(s:run(a:input, a:000), "\n", 1)
 endfunction
 

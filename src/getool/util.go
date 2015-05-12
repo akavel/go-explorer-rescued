@@ -9,6 +9,17 @@ import (
 	"regexp"
 )
 
+func untangleDoc(dpkg *doc.Package) {
+	for _, t := range dpkg.Types {
+		dpkg.Consts = append(dpkg.Consts, t.Consts...)
+		t.Consts = nil
+		dpkg.Vars = append(dpkg.Vars, t.Vars...)
+		t.Vars = nil
+		dpkg.Funcs = append(dpkg.Funcs, t.Funcs...)
+		t.Funcs = nil
+	}
+}
+
 var packageNamePats = []*regexp.Regexp{
 	// Last element with .suffix removed.
 	regexp.MustCompile(`/([^-./]+)[-.](?:git|svn|hg|bzr|v\d+)$`),

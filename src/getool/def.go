@@ -6,18 +6,17 @@ package main
 
 import (
 	"flag"
-	"io"
 	"os"
 )
 
 func init() {
 	var fs flag.FlagSet
-	commands["def"] = &command{
+	commands["def"] = &Command{
 		fs: &fs,
-		do: func() { os.Exit(doDef(os.Stdout, fs.Args())) },
+		do: func(ctx *Context) { os.Exit(doDef(ctx)) },
 	}
 }
 
-func doDef(out io.Writer, args []string) int {
+func doDef(ctx *Context) int {
 	return 0
 }

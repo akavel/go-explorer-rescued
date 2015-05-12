@@ -1,6 +1,7 @@
 // Copyright 2015 Gary Burd. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
+
 package main
 
 import (
@@ -11,9 +12,7 @@ import (
 	"go/format"
 	"go/parser"
 	"go/token"
-	"io"
 	"io/ioutil"
-	"os"
 
 	"golang.org/x/tools/imports"
 )
@@ -21,22 +20,22 @@ import (
 func init() {
 	var fs flag.FlagSet
 	goimport := fs.Bool("goimport", false, "use goimport instead of gofmt")
-	commands["fmt"] = &command{
+	commands["fmt"] = &Command{
 		fs: &fs,
-		do: func() { doFormat(os.Stdout, os.Stdin, fs.Args(), *goimport) },
+		do: func(ctx *Context) { doFormat(ctx, *goimport) },
 	}
 }
 
-func doFormat(wunbuf io.Writer, r io.Reader, args []string, goimport bool) {
-	w := bufio.NewWriter(wunbuf)
+func doFormat(ctx *Context, goimport bool) {
+	w := bufio.NewWriter(ctx.out)
 	defer w.Flush()
 
 	fname := ""
-	if len(args) == 1 {
-		fname = args[0]
+	if len(ctx.args) == 1 {
+		fname = ctx.args[0]
 	}
 
-	in, err := ioutil.ReadAll(r)
+	in, err := ioutil.ReadAll(ctx.in)
 	if err != nil {
 		fmt.Fprintf(w, "ERR\n%s", err)
 		return

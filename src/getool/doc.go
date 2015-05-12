@@ -32,19 +32,19 @@ const textWidth = 80 - len(textIndent)
 
 func init() {
 	var fs flag.FlagSet
-	commands["doc"] = &command{
+	commands["doc"] = &Command{
 		fs: &fs,
-		do: func() { os.Exit(doDoc(os.Stdout, fs.Args())) },
+		do: func(ctx *Context) { os.Exit(doDoc(ctx)) },
 	}
 }
 
-func doDoc(out io.Writer, args []string) int {
-	if len(args) != 1 {
-		fmt.Fprint(out, "one command line argument expected")
+func doDoc(ctx *Context) int {
+	if len(ctx.args) != 1 {
+		fmt.Fprint(ctx.out, "one command line argument expected")
 		return 1
 	}
 
-	importPath := filepath.ToSlash(args[0])
+	importPath := filepath.ToSlash(ctx.args[0])
 	importPath = strings.TrimPrefix(importPath, "godoc://")
 
 	p := docPrinter{
@@ -55,10 +55,10 @@ func doDoc(out io.Writer, args []string) int {
 	}
 
 	if importPath != "" {
-		pkg, err := loadPackage(importPath, loadDoc|loadExamples)
+		pkg, err := ctx.loadPackage(importPath, loadDoc|loadExamples)
 		if err != nil {
-			fmt.Fprint(out, err)
-			return 1
+			fmt.Fprintf(ctx.out, "E\n%s", err)
+			return 0
 		}
 		p.bpkg = pkg.bpkg
 		p.dpkg = pkg.dpkg
@@ -66,7 +66,7 @@ func doDoc(out io.Writer, args []string) int {
 		p.examples = pkg.examples
 	}
 
-	p.execute(out)
+	p.execute(ctx.out)
 	return 0
 }
 
@@ -367,8 +367,8 @@ func (p *docPrinter) printValues(values []*doc.Value) {
 	}
 }
 
-func (p *docPrinter) printFuncs(values []*doc.Func, examplePrefix string) {
-	for _, d := range values {
+func (p *docPrinter) printFuncs(funcs []*doc.Func, examplePrefix string) {
+	for _, d := range funcs {
 		p.printDecl(d.Decl)
 		p.printText(d.Doc)
 		p.printExamples(examplePrefix + d.Name)
@@ -563,10 +563,21 @@ func (v *declVisitor) Visit(n ast.Node) ast.Visitor {
 			ast.Walk(v, n)
 		}
 	case *ast.FuncDecl:
-		if n.Recv != nil {
+		if n.Recv == nil {
+			v.addAnnoation(anchorAnnotation, "", n.Name.NamePos)
+		} else {
 			ast.Walk(v, n.Recv)
+			if len(n.Recv.List) > 0 {
+				typ := n.Recv.List[0].Type
+				if se, ok := typ.(*ast.StarExpr); ok {
+					typ = se.X
+				}
+				if id, ok := typ.(*ast.Ident); ok {
+					v.addAnnoation(anchorAnnotation, id.Name, n.Name.NamePos)
+				}
+			}
 		}
-		v.addAnnoation(anchorAnnotation, "", n.Name.NamePos)
+
 		ast.Walk(v, n.Type)
 	case *ast.Field:
 		for _ = range n.Names {

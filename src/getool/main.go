@@ -9,35 +9,28 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 )
 
-type command struct {
+type Command struct {
 	fs *flag.FlagSet
-	do func()
+	do func(*Context)
 }
 
-var (
-	commands = map[string]*command{}
-	logFile  = flag.String("log", "", "write error output to `file`")
-	cwd      = flag.String("cwd", ".", "resolve relative paths from `dir`")
-)
+var commands = map[string]*Command{}
 
 func main() {
 	log.SetFlags(0)
 
+	cwd := flag.String("cwd", ".", "use `dir` to resolve relative paths")
+
 	flag.Usage = printUsage
 	flag.Parse()
 
-	if *logFile != "" {
-		f, err := os.Create(*logFile)
-		if err != nil {
-			log.Fatal(err)
-		}
-		os.Stderr = f
-		log.SetOutput(f)
-		defer f.Close()
+	if d, err := filepath.Abs(*cwd); err == nil {
+		*cwd = d
 	}
 
 	args := flag.Args()
@@ -47,13 +40,17 @@ func main() {
 				c.fs.PrintDefaults()
 				os.Exit(1)
 			}
-			c.fs.SetOutput(os.Stderr)
 			c.fs.Parse(args[1:])
-			c.do()
+			c.do(&Context{
+				cwd:  *cwd,
+				in:   os.Stdin,
+				out:  os.Stdout,
+				args: c.fs.Args(),
+			})
 			return
 		}
 	}
-	log.Fatal("unknown command")
+	log.Fatalf("getool: unknown command")
 }
 
 func printUsage() {

@@ -2,7 +2,7 @@
 " Use of this source code is governed by a BSD-style
 " license that can be found in the LICENSE file.
 
-function! s:import_text()
+function! s:import_text() abort
     let v = winsaveview()
     :0
     let p = searchpos('\v^(const|var|func|type)\s')
@@ -14,12 +14,17 @@ function! s:import_text()
     return join(getline(1, n), "\n") . ' '
 endfunction
 
-function! ge#complete#complete(arg, line, pos)
-    return ge#tool#runl(s:import_text(), 'complete', a:arg, a:line, a:pos)
+function! ge#complete#complete(arg, line, pos) abort
+    try
+        return ge#tool#runl(s:import_text(), '-cwd', expand('%:p:h'), 'complete', a:arg, a:line, a:pos)
+    catch /^go-explorer:/
+        echom v:errmsg
+        return a:arg
+    endtry
 endfunction
 
-function! ge#complete#resolve(arg)
-    return ge#tool#run(s:import_text(), 'resolve', a:arg)
+function! ge#complete#resolve(arg) abort
+    return ge#tool#run(s:import_text(), '-cwd', expand('%:p:h'), 'resolve', a:arg)
 endfunction
 
 " vim:ts=4:sw=4:et

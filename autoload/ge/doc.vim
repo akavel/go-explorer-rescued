@@ -4,62 +4,121 @@
 
 " read loads a buffer with documentation, link and anchor data. This function
 " is intended to be called from a BufReadCmd event.
-function! ge#doc#read()
-    setlocal noreadonly modifiable
-    let b:strings = []
-    let b:links = []
-    let b:anchors = {}
-    let out = ge#tool#runl('', 'doc', expand('%'))
-
-    if v:shell_error
-        call append(0, out)
-        setlocal buftype=nofile bufhidden=delete nobuflisted noswapfile nomodifiable
-        return
-    endif
-
-    let index = 0
-    while index < len(out)
-        let line = out[index]
-        let index = index + 1
-        let m = matchlist(line, '\C\v^S (.*)')
-        if len(m)
-            let b:strings = add(b:strings, m[1])
-            continue
-        endif
-        let m = matchlist(line, '\C\v^L ([0-9]+) ([0-9]+) ([0-9]+) ([-0-9]+)$')
-        if len(m)
-            call add(b:links, [str2nr(m[1]), str2nr(m[2]), str2nr(m[3]), str2nr(m[4])])
-            continue
-        endif
-        let m = matchlist(line, '\C\v^A ([0-9]+) (\S+)$')
-        if len(m)
-            let b:anchors[m[2]] = str2nr(m[1])
-            continue
-        endif
-         if line ==# 'D'
-            call append(0, out[index : -1])
-            break
-        endif
-    endwhile
-    setlocal foldmethod=syntax foldlevel=1 foldtext=ge#doc#foldtext()
-    setlocal buftype=nofile bufhidden=hide noswapfile nomodifiable readonly tabstop=4
-    setfiletype godoc
-    silent 0
-    nnoremap <buffer> <silent> <c-]> :call <SID>jump()<CR>
-    nnoremap <buffer> <silent> <c-t> :call <SID>pop()<CR>
-    nnoremap <buffer> <silent> ]] :call <SID>next_section('')<CR>
-    nnoremap <buffer> <silent> [[ :call <SID>next_section('b')<CR>
-    noremap <buffer> <silent> <2-LeftMouse> :call <SID>jump()<CR>
-    autocmd! * <buffer>
-    autocmd BufWinEnter <buffer> call s:update_highlight()
-    autocmd BufWinLeave <buffer> call s:clear_highlight()
-    autocmd CursorMoved <buffer> call s:update_highlight()
+"
+" The caller must execute the return value to report errors.
+function! ge#doc#read() abort
+    try
+        setlocal noreadonly modifiable
+        let b:strings = []
+        let b:links = []
+        let b:anchors = {}
+        let out = ge#tool#runl('', 'doc', expand('%'))
+        let index = 0
+        while index < len(out)
+            let line = out[index]
+            let index = index + 1
+            let m = matchlist(line, '\C\v^S (.*)')
+            if len(m)
+                " String
+                let b:strings = add(b:strings, m[1])
+                continue
+            endif
+            let m = matchlist(line, '\C\v^L ([0-9]+) ([0-9]+) ([0-9]+) ([-0-9]+)$')
+            if len(m)
+                " Link: start, end, file, position
+                call add(b:links, [str2nr(m[1]), str2nr(m[2]), str2nr(m[3]), str2nr(m[4])])
+                continue
+            endif
+            let m = matchlist(line, '\C\v^A ([0-9]+) (\S+)$')
+            if len(m)
+                " Anchor: position, name
+                let b:anchors[m[2]] = str2nr(m[1])
+                continue
+            endif
+             if line ==# 'D'
+                " Document
+                call append(0, out[index : -1])
+                break
+            endif
+            if line ==# 'E'
+                " Error
+                call append(0, out[index : -1])
+                setlocal buftype=nofile bufhidden=delete nobuflisted noswapfile nomodifiable
+                break
+            end
+        endwhile
+        setlocal foldlevel=1 foldtext=ge#doc#foldtext() foldcolumn=0 foldmethod=syntax
+        setlocal buftype=nofile bufhidden=hide noswapfile nomodifiable readonly
+        setlocal nonumber tabstop=4
+        setfiletype gedoc
+        silent 0
+        nnoremap <buffer> <silent> <c-]> :execute <SID>jump()<CR>
+        nnoremap <buffer> <silent> <c-t> :execute <SID>pop()<CR>
+        nnoremap <buffer> <silent> ]] :execute <SID>next_section('')<CR>
+        nnoremap <buffer> <silent> [[ :execute <SID>next_section('b')<CR>
+        noremap <buffer> <silent> <2-LeftMouse> :execute <SID>jump()<CR>
+        autocmd! * <buffer>
+        autocmd BufWinLeave <buffer> execute s:clear_highlight()
+        autocmd CursorMoved <buffer> execute s:update_highlight()
+    catch /^go-explorer:/
+        return 'echoerr v:errmsg'
+    endtry
+    return ''
 endfunction
 
-function! s:update_highlight()
+" open implements the GeDoc command.
+function! ge#doc#open(...) abort
+    if a:0 < 1 || a:0 > 2
+       'echoerr "one or two arguments required"'
+    endif
+    let pos = ''
+    if a:0 >= 2
+        let pos = a:2
+        if len(pos) > 0 && pos[-1:] ==# '.'
+            let pos = pos[:-2]
+        endif
+        let pos = "'" . escape(pos, '\') . "'"
+    endif
+    try
+        let p = ge#complete#resolve(a:1)
+        if &filetype != "gedoc"
+            let thiswin = winnr()
+            exe "norm! \<C-W>b"
+            if winnr() > 1
+                exe "norm! " . thiswin . "\<C-W>w"
+                while 1
+                    if &filetype == "gedoc"
+                        break
+                    endif
+                    exe "norm! \<C-W>w"
+                    if thiswin == winnr()
+                        break
+                    endif
+                endwhile
+            endif
+            if &filetype != "gedoc"
+                new
+            endif
+        endif
+        return 'edit godoc://' . p  .  ' | call ge#doc#go_to_pos(' . pos . ')'
+    catch /^go-explorer:/
+        return 'echoerr v:errmsg'
+    endtry
+    return ''
+endfunction
+
+function! s:update_highlight() abort
+    " With :syntax sync fromstart and :setlocal foldmethod=syntax, the last
+    " command in the following sequence is very slow:
+    "    :edit godoc://net/http
+    "    :edit junk
+    "    :edit #
+    " Switching to manual folding here fixes the problem.
+    setlocal foldmethod=manual
+
     let link = s:link()
     if exists('w:highlight_link') && w:highlight_link == link
-        return
+        return ''
     endif
     let w:highlight_link = link
     if exists('w:highlight_match') && w:highlight_match
@@ -67,21 +126,23 @@ function! s:update_highlight()
         let w:highlight_match = 0
     endif
     if len(link) == 0
-        return
+        return ''
     endif
     let w:highlight_match = matchadd('Underlined', '\%' . link[0] / 10000 . 'l\%' . link[0] % 10000 . 'c.\{' . (link[1] - link[0]) . '\}')
+    return ''
 endfunction
 
-function! s:clear_highlight()
+function! s:clear_highlight() abort
     if exists('w:highlight_match') && w:highlight_match
         call matchdelete(w:highlight_match)
     endif
     let w:highlight_match = 0
     let w:highlight_link = []
+    return ''
 endfunction
 
 " link returns the link under the cursor or []
-function! s:link()
+function! s:link() abort
     let p = line('.') * 10000 + col('.')
     for t in b:links
         if p >= t[0]
@@ -95,51 +156,65 @@ function! s:link()
     return []
 endfunction
 
-let s:stack = []
-
-function <SID>jump()
-    let link = s:link()
-    if len(link) == 0
+" go_to_pos moves cursor to location specified by pos. The pos argument is
+" either a string specfiying an anchor or line * 10000 + column.
+function ge#doc#go_to_pos(pos) abort
+    let pos = a:pos
+    if type(pos) == type('')
+        let pos = get(b:anchors, pos, 0)
+    endif
+    if pos == 0
         return
     endif
-    let file = b:strings[link[2]]
-    if link[3] >= 0
-        let name = b:strings[link[3]]
-    endif
-    if file == "" || match(file, '^godoc://') == 0
-        let s:stack = add(s:stack, [bufnr('%'), line('.'), col('.')])
-    endif
-    if file != ""
-        execute 'edit ' . file
-    endif
-    let pos = 0
-    if link[3] < 0
-        let pos = -link[3]
-    elseif exists('b:anchors') && name != ''
-        let pos = get(b:anchors, name, 0)
-    endif
-    if pos
-        exec pos / 10000
-        exec 'normal! ' . (pos % 10000) . '|'
-    endif
+    exec pos / 10000
+    exec 'normal! 0' . (pos % 10000 - 1) . 'l'
 endfunction
 
-function <SID>pop()
+let s:stack = []
+
+function <SID>jump() abort
+    let link = s:link()
+    if len(link) == 0
+        return ''
+    endif
+
+    if link[3] >= 0
+        let pos = "'" . b:strings[link[3]] . "'"
+    else
+        let pos = -link[3]
+    endif
+
+    let file = b:strings[link[2]]
+
+    if file == "" || match(file, '^godoc://') == 0
+        call add(s:stack, [bufnr('%'), line('.'), col('.')])
+    endif
+
+    let cmd = 'call ge#doc#go_to_pos(' . pos . ')'
+    if file != ""
+        let cmd = 'edit ' . file . ' | ' . cmd
+    endif
+    return cmd
+endfunction
+
+function <SID>pop() abort
     if len(s:stack) == 0
-        return
+        return ''
     endif
     let p = s:stack[-1]
     let s:stack = s:stack[:-2]
     exec p[0] . 'b'
     exec p[1]
-    exec 'normal! ' . p[2] . '|'
+    exec 'normal! 0' . (p[2] - 1) . 'l'
+    return ''
 endfunction
 
-function <SID>next_section(dir)
+function <SID>next_section(dir) abort
     call search('\C\v^[^ \t)}]', 'W' . a:dir)
+    return ''
 endfunction
 
-function ge#doc#foldtext()
+function ge#doc#foldtext() abort
     let line = getline(v:foldstart)
     let m = matchlist(line, '\C\v^(var|const) ')
     if len(m)

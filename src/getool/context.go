@@ -11,11 +11,19 @@ import (
 	"go/doc"
 	"go/parser"
 	"go/token"
+	"io"
 	"io/ioutil"
 	"path/filepath"
 	"regexp"
 	"sort"
 )
+
+type Context struct {
+	cwd  string
+	args []string
+	in   io.Reader
+	out  io.Writer
+}
 
 var linePat = regexp.MustCompile(`(?m)^//line .*$`)
 
@@ -64,8 +72,8 @@ const (
 	loadExamples
 )
 
-func loadPackage(importPath string, flags int) (*Package, error) {
-	bpkg, err := build.Import(importPath, *cwd, 0)
+func (ctx *Context) loadPackage(importPath string, flags int) (*Package, error) {
+	bpkg, err := build.Import(importPath, ctx.cwd, 0)
 	if _, ok := err.(*build.NoGoError); ok {
 		return &Package{bpkg: bpkg}, nil
 	}
