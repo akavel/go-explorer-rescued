@@ -71,7 +71,7 @@ function! ge#doc#open(...) abort
     if a:0 < 1 || a:0 > 2
        'echoerr "one or two arguments required"'
     endif
-    let pos = ''
+    let pos = 0
     if a:0 >= 2
         let pos = a:2
         if len(pos) > 0 && pos[-1:] ==# '.'
@@ -160,7 +160,7 @@ endfunction
 " either a string specfiying an anchor or line * 10000 + column.
 function ge#doc#go_to_pos(pos) abort
     let pos = a:pos
-    if type(pos) == type('')
+    if exists('b:anchors') && type(pos) == type('') 
         let pos = get(b:anchors, pos, 0)
     endif
     if pos == 0
