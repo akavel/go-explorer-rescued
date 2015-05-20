@@ -29,15 +29,15 @@ var completeTests = []struct {
 	// may be be because the workspace is not what's expected and not a failure
 	// in the package.
 
-	{"", "p1\nrepo2\nrepo3"},
-	{"repo", "repo2\nrepo3"},
+	{"\\", "\\p1\n\\repo2\n\\repo3"},
+	{"\\repo", "\\repo2\n\\repo3"},
 	{".", "./\n../"},
 	{"..", "../"},
-	{"/net/http Client", "Client."},
-	{"/net/http client.postf", "Client.PostForm"},
-	{"/github.com", "/github.com/"},
+	{"net/http Client", "Client."},
+	{"net/http client.postf", "Client.PostForm"},
+	{"github.com", "github.com/"},
 	{"../getool", "../getool/"},
-	{"/go/", "/go/ast/\n/go/build/\n/go/doc/\n/go/format/\n/go/parser/\n/go/printer/\n/go/scanner/\n/go/token/"},
+	{"go/", "go/ast/\ngo/build/\ngo/doc/\ngo/format/\ngo/parser/\ngo/printer/\ngo/scanner/\ngo/token/"},
 }
 
 func TestComplete(t *testing.T) {
@@ -48,7 +48,7 @@ func TestComplete(t *testing.T) {
 
 	for _, tt := range completeTests {
 		var buf bytes.Buffer
-		doComplete(&Context{
+		doCompletePackageID(&Context{
 			out: &buf,
 			in:  strings.NewReader(completeTestFile),
 			cwd: cwd,
@@ -70,10 +70,10 @@ var resolveTests = []struct {
 	in  string
 	out string
 }{
-	{"p1", "github.com/user/repo1"},
-	{"repo2", "github.com/user/repo2"},
-	{"/github.com/user/repo3", "github.com/user/repo3"},
-	{".", "github.com/garyburd/getool"},
+	{"\\p1", "github.com/user/repo1"},
+	{"\\repo2", "github.com/user/repo2"},
+	{"github.com/user/repo3", "github.com/user/repo3"},
+	{".", "github.com/garyburd/go-explorer/src/getool"},
 }
 
 func TestResolve(t *testing.T) {
@@ -84,7 +84,7 @@ func TestResolve(t *testing.T) {
 
 	for _, tt := range resolveTests {
 		var buf bytes.Buffer
-		doResolve(&Context{
+		doResolvePackage(&Context{
 			out:  &buf,
 			in:   strings.NewReader(completeTestFile),
 			cwd:  cwd,

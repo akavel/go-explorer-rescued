@@ -80,7 +80,7 @@ function! ge#doc#open(...) abort
         let pos = "'" . escape(pos, '\') . "'"
     endif
     try
-        let p = ge#complete#resolve(a:1)
+        let p = ge#complete#resolve_package(a:1)
         if &filetype != "gedoc"
             let thiswin = winnr()
             exe "norm! \<C-W>b"
@@ -107,6 +107,7 @@ function! ge#doc#open(...) abort
     return ''
 endfunction
 
+" update_highlight updates highlighted link.
 function! s:update_highlight() abort
     " With :syntax sync fromstart and :setlocal foldmethod=syntax, the last
     " command in the following sequence is very slow:
@@ -132,6 +133,7 @@ function! s:update_highlight() abort
     return ''
 endfunction
 
+" clear_highlight clears link highlighting.
 function! s:clear_highlight() abort
     if exists('w:highlight_match') && w:highlight_match
         call matchdelete(w:highlight_match)

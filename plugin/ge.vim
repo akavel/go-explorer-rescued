@@ -8,6 +8,6 @@ augroup ge_doc
     autocmd BufReadCmd  godoc://** execute ge#doc#read()
 augroup END
 
-command! -nargs=* -complete=customlist,ge#complete#complete GeDoc :execute ge#doc#open(<f-args>)
+command! -nargs=* -complete=customlist,ge#complete#complete_package_id GeDoc :execute ge#doc#open(<f-args>)
 
 " vim:ts=4:sw=4:et

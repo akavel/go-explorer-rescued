@@ -5,9 +5,9 @@
 // The complete and resolve commands support three forms of package
 // specifications:
 //
-//  /importpath - Import path with "/" prefix.
-//  ./relpath   - Relative path.
-//  name        - Name of imported package.
+//  importpath - Import path
+//  ./relpath   - Relative path
+//  \name       - Name of imported package
 //
 // The complete and resolve commands silently ignore errors. It is assumed that
 // downstream uses of the command results will detect and handle errors in some
@@ -34,18 +34,18 @@ import (
 
 func init() {
 	var cfs flag.FlagSet
-	commands["complete"] = &Command{
+	commands["complete-package-id"] = &Command{
 		fs: &cfs,
-		do: func(ctx *Context) { os.Exit(doComplete(ctx)) },
+		do: func(ctx *Context) { os.Exit(doCompletePackageID(ctx)) },
 	}
 	var rfs flag.FlagSet
-	commands["resolve"] = &Command{
+	commands["resolve-package"] = &Command{
 		fs: &rfs,
-		do: func(ctx *Context) { os.Exit(doResolve(ctx)) },
+		do: func(ctx *Context) { os.Exit(doResolvePackage(ctx)) },
 	}
 }
 
-func doComplete(ctx *Context) int {
+func doCompletePackageID(ctx *Context) int {
 	if len(ctx.args) != 3 {
 		fmt.Fprint(ctx.out, "complete: three arguments required\n")
 		return 1
@@ -93,16 +93,11 @@ func completePackage(ctx *Context, arg string) (completions []string) {
 		}
 		sort.Strings(completions)
 
-	case strings.ContainsAny(arg, "/."):
-		// Complete using import path.
-		completions = completePackageByPath(arg)
-		sort.Strings(completions)
-
-	default:
+	case strings.HasPrefix(arg, "\\"):
 		// Complete with package names imported in current file.
 		for n := range readImports(ctx.in) {
-			if strings.HasPrefix(n, arg) {
-				completions = append(completions, n)
+			if strings.HasPrefix(n, arg[1:]) {
+				completions = append(completions, "\\"+n)
 			}
 		}
 		if len(completions) == 0 && len(completePackageByPath(arg)) > 0 {
@@ -110,13 +105,18 @@ func completePackage(ctx *Context, arg string) (completions []string) {
 			completions = []string{arg}
 		}
 		sort.Strings(completions)
+
+	default:
+		// Complete using import path.
+		completions = completePackageByPath(arg)
+		sort.Strings(completions)
 	}
 	return completions
 }
 
 func completePackageByPath(arg string) []string {
 	var completions []string
-	dir, name := path.Split(strings.TrimPrefix(arg, "/"))
+	dir, name := path.Split(arg)
 	for _, srcDir := range build.Default.SrcDirs() {
 		fis, err := ioutil.ReadDir(filepath.Join(srcDir, filepath.FromSlash(dir)))
 		if err != nil {
@@ -127,7 +127,7 @@ func completePackageByPath(arg string) []string {
 				continue
 			}
 			if strings.HasPrefix(fi.Name(), name) {
-				completions = append(completions, path.Join("/", dir, fi.Name())+"/")
+				completions = append(completions, path.Join(dir, fi.Name())+"/")
 			}
 		}
 	}
@@ -187,23 +187,21 @@ func completeID(ctx *Context, importPath string, arg string) (completions []stri
 }
 
 func resolvePackageSpec(ctx *Context, spec string) string {
-	path := spec
+	path := strings.TrimRight(spec, "/")
 	switch {
 	case strings.HasPrefix(spec, "."):
 		if bpkg, err := build.Import(spec, ctx.cwd, build.FindOnly); err == nil {
 			path = bpkg.ImportPath
 		}
-	case strings.ContainsAny(spec, "/."):
-		path = strings.Trim(spec, "/")
-	default:
-		if p, ok := readImports(ctx.in)[spec]; ok {
+	case strings.HasPrefix(spec, "\\"):
+		if p, ok := readImports(ctx.in)[spec[1:]]; ok {
 			path = p
 		}
 	}
 	return path
 }
 
-func doResolve(ctx *Context) int {
+func doResolvePackage(ctx *Context) int {
 	if len(ctx.args) != 1 {
 		fmt.Fprint(ctx.out, "resolve: one argument required\n")
 		return 1

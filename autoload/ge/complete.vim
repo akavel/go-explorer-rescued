@@ -14,17 +14,17 @@ function! s:import_text() abort
     return join(getline(1, n), "\n") . ' '
 endfunction
 
-function! ge#complete#complete(arg, line, pos) abort
+function! ge#complete#complete_package_id(arg, line, pos) abort
     try
-        return ge#tool#runl(s:import_text(), '-cwd', expand('%:p:h'), 'complete', a:arg, a:line, a:pos)
+        return ge#tool#runl(s:import_text(), '-cwd', expand('%:p:h'), 'complete-package-id', a:arg, a:line, a:pos)
     catch /^go-explorer:/
         echom v:errmsg
         return a:arg
     endtry
 endfunction
 
-function! ge#complete#resolve(arg) abort
-    return ge#tool#run(s:import_text(), '-cwd', expand('%:p:h'), 'resolve', a:arg)
+function! ge#complete#resolve_package(arg) abort
+    return ge#tool#run(s:import_text(), '-cwd', expand('%:p:h'), 'resolve-package', a:arg)
 endfunction
 
 " vim:ts=4:sw=4:et
