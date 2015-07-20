@@ -32,13 +32,14 @@ const textWidth = 80 - len(textIndent)
 
 func init() {
 	var fs flag.FlagSet
+	all := fs.Bool("all", false, "show unexported identifiers")
 	commands["doc"] = &Command{
 		fs: &fs,
-		do: func(ctx *Context) { os.Exit(doDoc(ctx)) },
+		do: func(ctx *Context) { os.Exit(doDoc(ctx, *all)) },
 	}
 }
 
-func doDoc(ctx *Context) int {
+func doDoc(ctx *Context, all bool) int {
 	if len(ctx.args) != 1 {
 		fmt.Fprint(ctx.out, "one command line argument expected")
 		return 1
@@ -55,7 +56,11 @@ func doDoc(ctx *Context) int {
 	}
 
 	if importPath != "" {
-		pkg, err := ctx.loadPackage(importPath, loadDoc|loadExamples)
+		flags := loadDoc | loadExamples
+		if all {
+			flags |= loadUnexported
+		}
+		pkg, err := ctx.loadPackage(importPath, flags)
 		if err != nil {
 			fmt.Fprintf(ctx.out, "E\n%s", err)
 			return 0
