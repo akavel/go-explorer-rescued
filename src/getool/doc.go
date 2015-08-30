@@ -71,7 +71,7 @@ func doDoc(ctx *Context, all bool) int {
 		p.examples = pkg.examples
 	}
 
-	p.execute(ctx.out)
+	p.execute(ctx.out, all)
 	return 0
 }
 
@@ -95,7 +95,9 @@ type docPrinter struct {
 	scanOffset int
 }
 
-func (p *docPrinter) execute(out io.Writer) {
+func (p *docPrinter) execute(out io.Writer, all bool) {
+	printDecls := false
+
 	switch {
 	case p.importPath == "":
 		// root
@@ -108,6 +110,7 @@ func (p *docPrinter) execute(out io.Writer) {
 		p.printLink(path.Base(p.importPath), p.bpkg.Dir, p.stringAddress(""))
 		p.buf.WriteString("\n\n")
 		p.printText(p.dpkg.Doc)
+		printDecls = all
 	default:
 		p.buf.WriteString("package ")
 		p.printLink(p.dpkg.Name, p.bpkg.Dir, p.stringAddress(""))
@@ -116,7 +119,10 @@ func (p *docPrinter) execute(out io.Writer) {
 		p.buf.WriteString("\"\n\n")
 		p.printText(p.dpkg.Doc)
 		p.printExamples("")
+		printDecls = true
+	}
 
+	if printDecls {
 		p.buf.WriteString("FILES\n")
 		p.printFiles(p.bpkg.GoFiles, p.bpkg.CgoFiles)
 		p.printFiles(p.bpkg.TestGoFiles, p.bpkg.XTestGoFiles)
