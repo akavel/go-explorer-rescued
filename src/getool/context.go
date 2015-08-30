@@ -70,6 +70,7 @@ func (pkg *Package) parseFile(name string) (*ast.File, error) {
 const (
 	loadDoc = 1 << iota
 	loadExamples
+	loadUnexported
 )
 
 func (ctx *Context) loadPackage(importPath string, flags int) (*Package, error) {
@@ -100,7 +101,7 @@ func (ctx *Context) loadPackage(importPath string, flags int) (*Package, error) 
 
 	if flags&loadDoc != 0 {
 		mode := doc.Mode(0)
-		if pkg.bpkg.ImportPath == "builtin" {
+		if pkg.bpkg.ImportPath == "builtin" || flags&loadUnexported != 0 {
 			mode |= doc.AllDecls
 		}
 		pkg.dpkg = doc.New(pkg.apkg, pkg.bpkg.ImportPath, mode)

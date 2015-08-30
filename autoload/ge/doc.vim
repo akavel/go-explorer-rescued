@@ -12,7 +12,14 @@ function! ge#doc#read() abort
         let b:strings = []
         let b:links = []
         let b:anchors = {}
-        let out = ge#tool#runl('', 'doc', expand('%'))
+        if !exists("b:gedoc_showall")
+            let b:gedoc_showall = 0
+        endif
+        if b:gedoc_showall
+            let out = ge#tool#runl('', 'doc', '--all', expand('%'))
+        else
+            let out = ge#tool#runl('', 'doc', expand('%'))
+        endif
         let index = 0
         while index < len(out)
             let line = out[index]
@@ -54,6 +61,7 @@ function! ge#doc#read() abort
         silent 0
         nnoremap <buffer> <silent> <c-]> :execute <SID>jump()<CR>
         nnoremap <buffer> <silent> <c-t> :execute <SID>pop()<CR>
+        nnoremap <buffer> <silent> <c-a> :execute <SID>toggle_all()<CR>
         nnoremap <buffer> <silent> ]] :execute <SID>next_section('')<CR>
         nnoremap <buffer> <silent> [[ :execute <SID>next_section('b')<CR>
         noremap <buffer> <silent> <2-LeftMouse> :execute <SID>jump()<CR>
@@ -209,6 +217,11 @@ function <SID>pop() abort
     exec p[1]
     exec 'normal! 0' . (p[2] - 1) . 'l'
     return ''
+endfunction
+
+function! <SID>toggle_all() abort
+    let b:gedoc_showall = !b:gedoc_showall
+    edit
 endfunction
 
 function <SID>next_section(dir) abort
