@@ -42,7 +42,7 @@ function! s:run(input, args) abort
     for arg in a:args
         let cmd = cmd . ' ' . shellescape(arg)
     endfor
-    if a:input == ''
+    if a:input ==# ''
         let result = system(cmd)
     else
         let result = system(cmd, a:input)

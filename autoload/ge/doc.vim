@@ -77,7 +77,7 @@ endfunction
 " open implements the GeDoc command.
 function! ge#doc#open(...) abort
     if a:0 < 1 || a:0 > 2
-       'echoerr "one or two arguments required"'
+       return 'echoerr "one or two arguments required"'
     endif
     let pos = 0
     if a:0 >= 2
@@ -89,13 +89,13 @@ function! ge#doc#open(...) abort
     endif
     try
         let p = ge#complete#resolve_package(a:1)
-        if &filetype != "gedoc"
+        if &filetype !=# 'gedoc'
             let thiswin = winnr()
             exe "norm! \<C-W>b"
             if winnr() > 1
-                exe "norm! " . thiswin . "\<C-W>w"
+                exe 'norm! ' . thiswin . '\<C-W>w'
                 while 1
-                    if &filetype == "gedoc"
+                    if &filetype ==# 'gedoc'
                         break
                     endif
                     exe "norm! \<C-W>w"
@@ -104,7 +104,7 @@ function! ge#doc#open(...) abort
                     endif
                 endwhile
             endif
-            if &filetype != "gedoc"
+            if &filetype !=# 'gedoc'
                 new
             endif
         endif
@@ -196,12 +196,12 @@ function <SID>jump() abort
 
     let file = b:strings[link[2]]
 
-    if file == "" || match(file, '^godoc://') == 0
+    if file ==# '' || match(file, '^godoc://') == 0
         call add(s:stack, [bufnr('%'), line('.'), col('.')])
     endif
 
     let cmd = 'call ge#doc#go_to_pos(' . pos . ')'
-    if file != ""
+    if file !=# ''
         let cmd = 'edit ' . file . ' | ' . cmd
     endif
     return cmd
@@ -245,7 +245,7 @@ function ge#doc#foldtext() abort
         sort(ids)
         return m[1] . ' ' . join(ids) . ' '
     endif
-    if line[-2:] == ' {'
+    if line[-2:] ==# ' {'
         " chop { following a struct or interface
         let line = line[:-3]
     endif
