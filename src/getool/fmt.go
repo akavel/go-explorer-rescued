@@ -22,11 +22,11 @@ func init() {
 	goimport := fs.Bool("goimport", false, "use goimport instead of gofmt")
 	commands["fmt"] = &Command{
 		fs: &fs,
-		do: func(ctx *Context) { doFormat(ctx, *goimport) },
+		do: func(ctx *Context) int { return doFormat(ctx, *goimport) },
 	}
 }
 
-func doFormat(ctx *Context, goimport bool) {
+func doFormat(ctx *Context, goimport bool) int {
 	w := bufio.NewWriter(ctx.out)
 	defer w.Flush()
 
@@ -38,7 +38,7 @@ func doFormat(ctx *Context, goimport bool) {
 	in, err := ioutil.ReadAll(ctx.in)
 	if err != nil {
 		fmt.Fprintf(w, "ERR\n%s", err)
-		return
+		return 0
 	}
 
 	var out []byte
@@ -48,19 +48,19 @@ func doFormat(ctx *Context, goimport bool) {
 		out, err = imports.Process(fname, in, nil)
 		if err != nil {
 			fmt.Fprintf(w, "ERR\n%s", err)
-			return
+			return 0
 		}
 	} else {
 		fset := token.NewFileSet()
 		file, err := parser.ParseFile(fset, fname, in, parser.ParseComments)
 		if err != nil {
 			fmt.Fprintf(w, "ERR\n%s", err)
-			return
+			return 0
 		}
 		var buf bytes.Buffer
 		if err := format.Node(&buf, fset, file); err != nil {
 			fmt.Fprintf(w, "ERR\n%s", err)
-			return
+			return 0
 		}
 		out = buf.Bytes()
 	}
@@ -73,7 +73,7 @@ func doFormat(ctx *Context, goimport bool) {
 
 	if bytes.Equal(in, out) {
 		fmt.Fprintf(w, "OK")
-		return
+		return 0
 	}
 
 	linesIn := bytes.Split(in, []byte{'\n'})
@@ -104,4 +104,5 @@ func doFormat(ctx *Context, goimport bool) {
 	for _, l := range linesOut[head : len(linesOut)-tail] {
 		fmt.Fprintf(w, "\n%s", l)
 	}
+	return 0
 }

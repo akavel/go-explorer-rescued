@@ -16,7 +16,7 @@ import (
 
 type Command struct {
 	fs *flag.FlagSet
-	do func(*Context)
+	do func(*Context) int
 }
 
 var commands = map[string]*Command{}
@@ -41,13 +41,12 @@ func main() {
 				os.Exit(1)
 			}
 			c.fs.Parse(args[1:])
-			c.do(&Context{
+			os.Exit(c.do(&Context{
 				cwd:  *cwd,
 				in:   os.Stdin,
 				out:  os.Stdout,
 				args: c.fs.Args(),
-			})
-			return
+			}))
 		}
 	}
 	log.Fatalf("getool: unknown command")

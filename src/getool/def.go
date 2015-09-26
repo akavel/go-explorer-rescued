@@ -4,16 +4,13 @@
 
 package main
 
-import (
-	"flag"
-	"os"
-)
+import "flag"
 
 func init() {
 	var fs flag.FlagSet
 	commands["def"] = &Command{
 		fs: &fs,
-		do: func(ctx *Context) { os.Exit(doDef(ctx)) },
+		do: func(ctx *Context) int { return doDef(ctx) },
 	}
 }
 

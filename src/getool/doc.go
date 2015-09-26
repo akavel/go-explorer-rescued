@@ -16,7 +16,6 @@ import (
 	"go/token"
 	"io"
 	"io/ioutil"
-	"os"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -35,7 +34,7 @@ func init() {
 	all := fs.Bool("all", false, "show unexported identifiers")
 	commands["doc"] = &Command{
 		fs: &fs,
-		do: func(ctx *Context) { os.Exit(doDoc(ctx, *all)) },
+		do: func(ctx *Context) int { return doDoc(ctx, *all) },
 	}
 }
 

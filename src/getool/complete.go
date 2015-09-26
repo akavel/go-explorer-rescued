@@ -24,7 +24,6 @@ import (
 	"go/token"
 	"io"
 	"io/ioutil"
-	"os"
 	"path"
 	"path/filepath"
 	"sort"
@@ -36,12 +35,12 @@ func init() {
 	var cfs flag.FlagSet
 	commands["complete-package-id"] = &Command{
 		fs: &cfs,
-		do: func(ctx *Context) { os.Exit(doCompletePackageID(ctx)) },
+		do: func(ctx *Context) int { return doCompletePackageID(ctx) },
 	}
 	var rfs flag.FlagSet
 	commands["resolve-package"] = &Command{
 		fs: &rfs,
-		do: func(ctx *Context) { os.Exit(doResolvePackage(ctx)) },
+		do: func(ctx *Context) int { return doResolvePackage(ctx) },
 	}
 }
 
